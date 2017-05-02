@@ -1,3 +1,5 @@
+require 'shellwords'
+
 module RarSwitch
 	DISABLE_AV_CHECK = "-av-"
 	DISABLE_COMMENTS_SHOW = "-c-"
@@ -54,8 +56,13 @@ class InnerRarFile
 		@name <=> anOther.Name
 	end
 
-	def Extract destination
-		@rar_file.ExtractFile self, destination
+	def Extract destination_path, file_name = ""
+		puts "file_name #{file_name}"
+		if file_name == ""
+			@rar_file.ExtractFile self, destination_path, self.Name.split("/").last
+		else
+			@rar_file.ExtractFile self, destination_path, file_name
+		end
 	end
 end
 
@@ -63,7 +70,8 @@ class RarFile
 	attr_accessor :files, :excluded_files, :original_file_name, :switches, :password
 
 	def ListFiles
-		str = `unrar l #{original_file_name}`
+		str = self.ExecuteCommand "l", original_file_name
+		#`unrar l #{original_file_name}`
 
 		strs = str.split("\n")
 
@@ -82,7 +90,7 @@ class RarFile
 		}
 	end
 
-	def initialize file_name, switches = []
+	def initialize file_name, switches = [RarSwitch::ASSUME_YES_ON_ALL_QUERIES]
 		@original_file_name = file_name
 		@files = []
 		@switches = switches
@@ -100,7 +108,7 @@ class RarFile
 	end
 
 	def RemoveSwitch switch
-		# TODO
+		@switches.delete switch
 	end
 
 	def SetPassword password
@@ -110,12 +118,19 @@ class RarFile
 	def ExcludeFile file
 		@excluded_files.push file
 		@excluded_files = @excluded_files.uniq
+
+		to_remove = @files.select{|search| search.Name == file.Name } if file.is_a? InnerRarFile
+		to_remove = @files.select{|search| search.Name == file } if file.is_a? String
+		@files.delete to_remove
 	end
 
 	def ExcludeFilesFromList file_list
 		file_list.each{|file| 
 			@excluded_files.push file 
-			# todo: remove from @files
+
+			to_remove = @files.select{|search| search.Name == file.Name } if file.is_a? InnerRarFile
+			to_remove = @files.select{|search| search.Name == file } if file.is_a? String
+			@files.delete to_remove
 		}
 		@excluded_files = @excluded_files.uniq
 	end
@@ -127,30 +142,35 @@ class RarFile
 		@files
 	end
 
-	def ExtractArchive destination, full_path = false
-
+	def ExtractArchive destination
+		self.ExecuteCommand "e", "#{@original_file_name} #{destination}"
 	end
 
 	def TestArchiveFiles
 
 	end
 
-	def ExtractFile file, destination, full_path = false
-		new_file_name = destination.split("/").last
+	def ExtractFile file, destination_path, file_name
+		new_file_name = file_name
 		old_file_name = file.Name.split("/").last
 
-		new_path = destination[0, destination.size - new_file_name.size]
+		new_path = destination_path
 
-		`unrar e -y #{original_file_name} #{Shellwords.escape(file.Name)} #{new_path}`
+		self.ExecuteCommand "e", "#{@original_file_name} #{Shellwords.escape(file.Name)} #{new_path}"
 		
-		if(File.directory? destination)
-			puts "#{destination} is a dir."
-			return
-		end
-
 		`mv #{Shellwords.escape(new_path + old_file_name)} #{Shellwords.escape(new_path + new_file_name)}`
 
 		return new_path + new_file_name
+	end
+
+	def ExecuteCommand command, arguments
+		command = "unrar #{command} "
+		@switches.each {|switch|
+			command += "#{switch} "
+		}
+		command += "#{arguments}"
+		puts command
+		`#{command}`
 	end
 
 end
